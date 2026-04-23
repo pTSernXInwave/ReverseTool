@@ -7,7 +7,9 @@ import zlib from "zlib";
 import crypto from "crypto";
 
 function usage() {
-  console.error("Usage: node tools/extract-luna-assets.js <input.html> [output-dir]");
+  console.error("Usage: node extractor.js <project-name> [out-root]");
+  console.error("Example: node extractor.js example out");
+  console.error("Default out-root: _out");
 }
 
 function sanitizeRelativePath(inputPath) {
@@ -327,18 +329,22 @@ async function run(htmlPath, outDir) {
 }
 
 async function main() {
-  const input = process.argv[2];
   const output = process.argv[3];
-  if (!input) {
+  const projectName = process.argv[2];
+  const outRootArg = process.argv[3] || "_out";
+  if (!projectName) {
     usage();
     process.exitCode = 1;
     return;
   }
 
-  const htmlPath = path.resolve(input);
-  const outDir =
-    output ||
-    path.join(path.dirname(htmlPath), `${path.basename(htmlPath, path.extname(htmlPath))}.extracted`);
+  const htmlPath = path.resolve(`${projectName}.html`);
+  if (!fs.existsSync(htmlPath)) {
+    throw new Error(`Build file not found: ${htmlPath}`);
+  }
+
+  const outRoot = path.resolve(outRootArg);
+  const outDir = path.join(outRoot, `${projectName}.extracted`);
 
   await run(htmlPath, outDir);
 }
