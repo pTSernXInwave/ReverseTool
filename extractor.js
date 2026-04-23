@@ -329,7 +329,6 @@ async function run(htmlPath, outDir) {
 }
 
 async function main() {
-  const output = process.argv[3];
   const projectName = process.argv[2];
   const outRootArg = process.argv[3] || "_out";
   if (!projectName) {
