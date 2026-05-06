@@ -161,6 +161,40 @@ function disablePreloaderIconReloadGuard(html) {
   return { html: updated, removedCount };
 }
 
+function injectPTSHeaderConfig(html) {
+  const marker = "window.$pTS.channel";
+  if (html.includes(marker)) {
+    return { html, injected: false };
+  }
+
+  const cfg =
+    '<script>window.$pTS=window.$pTS||{};window.$pTS.ios="";window.$pTS.android="";window.$pTS.channel="applovin";</script>';
+
+  if (html.includes("</head>")) {
+    return { html: html.replace("</head>", `${cfg}</head>`), injected: true };
+  }
+  if (html.includes("<body")) {
+    return { html: html.replace("<body", `${cfg}<body`), injected: true };
+  }
+  return { html: `${cfg}${html}`, injected: true };
+}
+
+function replaceInstallFullGameWithPTS(html) {
+  const minifiedFn =
+    'function(){const _ios=window.$pTS.ios,_android=window.$pTS.android,_isIOS=/iphone|ipad|ipod|macintosh/i.test(window.navigator.userAgent);switch(window.$pTS.channel){case"applovin":mraid.open();return;case"unity":mraid.open(_isIOS?_ios:_android);return;case"tiktok":window.openAppStore&&window.openAppStore();return;case"mintergral":window.gameEnd&&window.gameEnd(),window.install&&window.install();return;case"google":ExitApi.exit();return;case"ironsource":dapi.openStoreUrl&&dapi.openStoreUrl();return;default:window.open(_isIOS?_ios:_android,"_blank");return;}}';
+
+  const pattern =
+    /Luna\.Unity\.Playable\.InstallFullGame\s*=\s*function\s*\([^)]*\)\s*\{[^{}]*mraid\.open\(o\)[^{}]*\}/g;
+
+  let replacedCount = 0;
+  const updated = html.replace(pattern, () => {
+    replacedCount++;
+    return `Luna.Unity.Playable.InstallFullGame=${minifiedFn}`;
+  });
+
+  return { html: updated, replacedCount };
+}
+
 async function run(projectName, outRootArg) {
   if (!projectName) {
     usage();
@@ -202,6 +236,12 @@ async function run(projectName, outRootArg) {
   const preloaderGuardResult = disablePreloaderIconReloadGuard(html);
   html = preloaderGuardResult.html;
 
+  const ptsHeaderResult = injectPTSHeaderConfig(html);
+  html = ptsHeaderResult.html;
+
+  const installFullGameResult = replaceInstallFullGameWithPTS(html);
+  html = installFullGameResult.html;
+
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, html, "utf8");
 
@@ -215,6 +255,8 @@ async function run(projectName, outRootArg) {
   console.log(`Base122 sound payloads skipped: ${soundResult.unsupportedCount}`);
   console.log(`Anti-tamper reload checks removed: ${antiTamperResult.removedCount}`);
   console.log(`Preloader icon guard reloads removed: ${preloaderGuardResult.removedCount}`);
+  console.log(`$pTS header injected: ${ptsHeaderResult.injected ? 1 : 0}`);
+  console.log(`InstallFullGame replacements: ${installFullGameResult.replacedCount}`);
 
   if (inlineResult.missingIds.length > 0) {
     console.log("Missing inline asset paths (first 20):");
