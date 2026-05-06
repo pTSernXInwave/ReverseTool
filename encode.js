@@ -107,36 +107,56 @@ function updateSoundExpressions(html, soundsRoot) {
 function disablePackageLinkTamperReload(html) {
   let removedCount = 0;
 
-  const patterns = [
-    /if\([^)]*?packageConfig[^)]*?androidLink[^)]*?iosLink[^)]*?\)\s*window\[['"]location['"]\]\[[^\]]+\]\(\);/g,
-    /if\([^)]*?packageConfig[^)]*?androidLink[^)]*?iosLink[^)]*?\)\s*window\.location\.reload\(\);/g,
-    /if\([\s\S]*?packageConfig[\s\S]*?androidLink[\s\S]*?iosLink[\s\S]*?\)\s*window\[['"]location['"]\]\[[^\]]+\]\(\);/g,
-    /if\([\s\S]*?packageConfig[\s\S]*?androidLink[\s\S]*?iosLink[\s\S]*?\)\s*window\.location\.reload\(\);/g,
-  ];
-
   let updated = html;
-  for (const pattern of patterns) {
-    updated = updated.replace(pattern, (match) => {
-      removedCount++;
-      return `/* removed anti-tamper package link reload check */`;
-    });
+  const start = updated.indexOf("function _initSyncDecompression(){");
+  if (start >= 0) {
+    const end = updated.indexOf("function _fetchFreeWorker", start);
+    const blockEnd = end >= 0 ? end : Math.min(updated.length, start + 6000);
+    const block = updated.slice(start, blockEnd);
+
+    let relCall = block.indexOf("window['location'][");
+    if (relCall < 0) {
+      relCall = block.indexOf('window["location"][');
+    }
+
+    if (relCall >= 0) {
+      const absCall = start + relCall;
+      const semi = updated.indexOf(";", absCall);
+      if (semi > absCall) {
+        updated =
+          updated.slice(0, absCall) +
+          "void 0/* anti-tamper reload disabled */" +
+          updated.slice(semi);
+        removedCount++;
+      }
+    }
   }
 
-  // Obfuscated Luna builds often call: window['location'][_0x....(...)]();
-  // We only neutralize this call when it appears in the packageConfig/iosLink/androidLink tamper-check region.
-  updated = updated.replace(/window\[['"]location['"]\]\[[^\]]+\]\(\);/g, (match, offset, full) => {
-    const start = Math.max(0, offset - 2000);
-    const context = full.slice(start, offset + 200);
-    const isTamperContext =
-      context.includes("_initSyncDecompression") &&
-      context.includes("packageConfig") &&
-      context.includes("androidLink") &&
-      context.includes("iosLink");
+  return { html: updated, removedCount };
+}
 
-    if (!isTamperContext) return match;
-    removedCount++;
-    return `/* removed anti-tamper location reload */`;
-  });
+function disablePreloaderIconReloadGuard(html) {
+  let removedCount = 0;
+  let updated = html;
+
+  const exactObfCall = "window[_0x154337(0x116)][_0x154337(0x117)]();";
+  const exactHits = (updated.match(/window\[_0x154337\(0x116\)\]\[_0x154337\(0x117\)\]\(\);/g) || []).length;
+  if (exactHits > 0) {
+    updated = updated.split(exactObfCall).join("void 0/* preloader icon guard disabled */;");
+    removedCount += exactHits;
+  }
+
+  // Fallback: plain reload call inside preloader guard function.
+  const fnStart = updated.indexOf("function _0x393758(");
+  if (fnStart >= 0) {
+    const fnEnd = updated.indexOf("function _0x4e71()", fnStart);
+    const blockEnd = fnEnd >= 0 ? fnEnd : Math.min(updated.length, fnStart + 4000);
+    const block = updated.slice(fnStart, blockEnd);
+    if (block.includes("window.location.reload();")) {
+      updated = updated.replace("window.location.reload();", "void 0/* preloader icon guard disabled */;");
+      removedCount++;
+    }
+  }
 
   return { html: updated, removedCount };
 }
@@ -179,6 +199,9 @@ async function run(projectName, outRootArg) {
   const antiTamperResult = disablePackageLinkTamperReload(html);
   html = antiTamperResult.html;
 
+  const preloaderGuardResult = disablePreloaderIconReloadGuard(html);
+  html = preloaderGuardResult.html;
+
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, html, "utf8");
 
@@ -191,6 +214,7 @@ async function run(projectName, outRootArg) {
   console.log(`Sound files missing: ${soundResult.missingCount}`);
   console.log(`Base122 sound payloads skipped: ${soundResult.unsupportedCount}`);
   console.log(`Anti-tamper reload checks removed: ${antiTamperResult.removedCount}`);
+  console.log(`Preloader icon guard reloads removed: ${preloaderGuardResult.removedCount}`);
 
   if (inlineResult.missingIds.length > 0) {
     console.log("Missing inline asset paths (first 20):");
