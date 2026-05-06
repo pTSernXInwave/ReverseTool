@@ -104,6 +104,43 @@ function updateSoundExpressions(html, soundsRoot) {
   return { html: updated, changedCount, missingCount, unsupportedCount, missingPaths: [...missingPaths] };
 }
 
+function disablePackageLinkTamperReload(html) {
+  let removedCount = 0;
+
+  const patterns = [
+    /if\([^)]*?packageConfig[^)]*?androidLink[^)]*?iosLink[^)]*?\)\s*window\[['"]location['"]\]\[[^\]]+\]\(\);/g,
+    /if\([^)]*?packageConfig[^)]*?androidLink[^)]*?iosLink[^)]*?\)\s*window\.location\.reload\(\);/g,
+    /if\([\s\S]*?packageConfig[\s\S]*?androidLink[\s\S]*?iosLink[\s\S]*?\)\s*window\[['"]location['"]\]\[[^\]]+\]\(\);/g,
+    /if\([\s\S]*?packageConfig[\s\S]*?androidLink[\s\S]*?iosLink[\s\S]*?\)\s*window\.location\.reload\(\);/g,
+  ];
+
+  let updated = html;
+  for (const pattern of patterns) {
+    updated = updated.replace(pattern, (match) => {
+      removedCount++;
+      return `/* removed anti-tamper package link reload check */`;
+    });
+  }
+
+  // Obfuscated Luna builds often call: window['location'][_0x....(...)]();
+  // We only neutralize this call when it appears in the packageConfig/iosLink/androidLink tamper-check region.
+  updated = updated.replace(/window\[['"]location['"]\]\[[^\]]+\]\(\);/g, (match, offset, full) => {
+    const start = Math.max(0, offset - 2000);
+    const context = full.slice(start, offset + 200);
+    const isTamperContext =
+      context.includes("_initSyncDecompression") &&
+      context.includes("packageConfig") &&
+      context.includes("androidLink") &&
+      context.includes("iosLink");
+
+    if (!isTamperContext) return match;
+    removedCount++;
+    return `/* removed anti-tamper location reload */`;
+  });
+
+  return { html: updated, removedCount };
+}
+
 async function run(projectName, outRootArg) {
   if (!projectName) {
     usage();
@@ -139,6 +176,9 @@ async function run(projectName, outRootArg) {
   const soundResult = updateSoundExpressions(html, soundsDir);
   html = soundResult.html;
 
+  const antiTamperResult = disablePackageLinkTamperReload(html);
+  html = antiTamperResult.html;
+
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, html, "utf8");
 
@@ -150,6 +190,7 @@ async function run(projectName, outRootArg) {
   console.log(`Inline image files missing: ${inlineResult.missingCount}`);
   console.log(`Sound files missing: ${soundResult.missingCount}`);
   console.log(`Base122 sound payloads skipped: ${soundResult.unsupportedCount}`);
+  console.log(`Anti-tamper reload checks removed: ${antiTamperResult.removedCount}`);
 
   if (inlineResult.missingIds.length > 0) {
     console.log("Missing inline asset paths (first 20):");
