@@ -6,7 +6,7 @@ This project has 2 scripts:
 - `encode.js`: rebuild a new HTML by re-encoding assets from extracted folders
 
 ## Requirements
-- Node.js 18+ (recommended)
+- [Node.js 18+](https://nodejs.org/en/download) (recommended)
 - Run commands in this project folder
 
 ## File naming convention
